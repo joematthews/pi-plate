@@ -551,9 +551,9 @@ describe("tool_result", () => {
     expect(result).toBeUndefined();
   });
 
-  it("passes details, isError, and usage through untouched", () => {
-    // pi reads these from the returned result verbatim, so dropping them would
-    // discard the bash tool's truncation metadata.
+  it("patches only content, leaving the rest for pi to merge", () => {
+    // pi merges a handler's result over the original, so returning details, isError,
+    // or usage here would overwrite the tool's own values and any other extension's.
     const event = bashResult("cd src", { isError: true });
     const result = call<Record<string, unknown>>(
       harness.handlers,
@@ -561,9 +561,7 @@ describe("tool_result", () => {
       event,
       harness.ctx,
     );
-    expect(result.details).toBe(event.details);
-    expect(result.usage).toBe(event.usage);
-    expect(result.isError).toBe(true);
+    expect(Object.keys(result)).toEqual(["content"]);
   });
 
   it("does not mutate the original result content", () => {

@@ -408,16 +408,14 @@ export default function piPlate(pi: ExtensionAPI): void {
     if (typeof command === "string" && !mutatesShellState(command)) {
       return undefined;
     }
+    // Only `content` changes. pi merges a handler's result over the original, so
+    // everything omitted here -- the bash tool's truncation metadata among it --
+    // carries through untouched, and other extensions' patches survive too.
     return {
-      // pi takes details and usage from this result verbatim, so pass the
-      // originals through or the bash tool's truncation metadata is dropped.
       content: [
         ...event.content,
         { type: "text" as const, text: wrapNote(buildBashStateNotice(ctx.cwd)) },
       ],
-      details: event.details,
-      isError: event.isError,
-      usage: event.usage,
     };
   });
 }
