@@ -2,19 +2,20 @@
   "version": "0.2",
   "caseSensitive": false,
   "allowCompoundWords": true,
-  "ignorePaths": ["node_modules/**", "package-lock.json", "coverage/**"],
-  "words": [
-    "doesn",
-    "earendil",
-    "humble",
-    "jsonc",
-    "plate",
-    "popd",
-    "pushd",
-    "sess",
-    "tsconfig",
-    "typecheck",
-    "venv",
-    "vitest"
-  ]
+  "ignorePaths": ["coverage/**", "node_modules/**", "package-lock.json"],
+  "dictionaries": [
+    "typescript",
+    "node",
+    "npm",
+    "softwareTerms",
+    "bash",
+    "shell",
+    "git",
+    "filetypes",
+    "markdown",
+    "html",
+    "css",
+    "fullstack"
+  ],
+  "words": ["Qwen", "earendil"]
 }

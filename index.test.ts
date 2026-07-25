@@ -1,5 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import piPlate, {
   bashEnabled,
   buildBashNote,
@@ -11,19 +15,20 @@ import piPlate, {
   describeRepo,
   formatGitNote,
   type GitState,
-  isNotable,
-  MAX_DETAILED_REPOS,
   mutatesShellState,
   NOTE_TYPE,
   parseGitStatus,
   PROVENANCE_NOTE,
+  readGitRoot,
   readGitState,
+  readRepoStates,
   type RepoState,
   wrapNote,
 } from "./index.ts";
 
-const repo = (name: string | undefined, state: Partial<GitState>): RepoState => ({
+const repo = (name: string | undefined, state: Partial<GitState>, root?: string): RepoState => ({
   ...(name === undefined ? {} : { name }),
+  ...(root === undefined ? {} : { root }),
   state: { dirtyCount: 0, ahead: 0, behind: 0, branch: "main", head: "9b3a2059", ...state },
 });
 
@@ -34,11 +39,6 @@ const repo = (name: string | undefined, state: Partial<GitState>): RepoState => 
 describe("wrapNote", () => {
   it("wraps one fact per block", () => {
     expect(wrapNote("a fact")).toBe("<pi-note>\na fact\n</pi-note>");
-  });
-
-  it("uses a tag anchored to pi, not to the extension", () => {
-    // The model is told it runs inside pi; it has never heard of pi-plate.
-    expect(wrapNote("x")).not.toContain("pi-plate");
   });
 });
 
@@ -59,12 +59,19 @@ describe("bashEnabled", () => {
 });
 
 describe("buildEnvironmentNote", () => {
-  it("reports platform and arch", () => {
-    expect(buildEnvironmentNote()).toMatch(/^Environment: \w+ \w+$/);
+  it("names the product, not the process.platform value", () => {
+    // "macOS" carries the BSD-userland associations that "darwin" does not.
+    const expected: Record<string, string> = {
+      darwin: "Environment: macOS (Darwin) ",
+      linux: "Environment: Linux ",
+      win32: "Environment: Windows ",
+    };
+    const prefix = expected[process.platform] ?? `Environment: ${process.platform} `;
+    expect(buildEnvironmentNote()).toContain(prefix);
   });
 
-  it("omits locale and region, which the time note already carries", () => {
-    expect(buildEnvironmentNote()).not.toMatch(/en-US|America|region/);
+  it("ends with the architecture", () => {
+    expect(buildEnvironmentNote().endsWith(process.arch)).toBe(true);
   });
 });
 
@@ -108,8 +115,8 @@ describe("buildBashStateNotice", () => {
     const notice = buildBashStateNotice("/repo");
     expect(notice).toContain("has exited");
     expect(notice).toContain("/repo");
-    // The static note carries the directive; repeating it here would be the bloat
-    // that made the old per-call note expensive.
+    // The static note carries the directive. This one fires repeatedly, so it stays
+    // an event report; restating the rule here would cost tokens on every firing.
     expect(notice).not.toContain("chained with &&");
   });
 });
@@ -204,18 +211,74 @@ describe("readGitState", () => {
   });
 });
 
-describe("isNotable", () => {
-  const base: GitState = { branch: "main", head: "abc", dirtyCount: 0, ahead: 0, behind: 0 };
+describe("readRepoStates", () => {
+  let base: string;
+  const run = (dir: string, args: string[]) =>
+    execFileSync("git", args, { cwd: dir, stdio: "ignore" });
 
-  it("is false only for a clean, synced, committed repo", () => {
-    expect(isNotable(base)).toBe(false);
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), "pi-plate-"));
   });
 
-  it("is true for uncommitted work, drift, or an unborn branch", () => {
-    expect(isNotable({ ...base, dirtyCount: 1 })).toBe(true);
-    expect(isNotable({ ...base, ahead: 1 })).toBe(true);
-    expect(isNotable({ ...base, behind: 1 })).toBe(true);
-    expect(isNotable({ ...base, head: undefined })).toBe(true);
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it("reports cwd's own repo, with no name and no root", () => {
+    run(base, ["init", "-q"]);
+    const [own, ...rest] = readRepoStates(base);
+    expect(rest).toHaveLength(0);
+    expect(own?.name).toBeUndefined();
+    expect(own?.root).toBeUndefined();
+  });
+
+  it("reports the enclosing repo, and its root, from a subdirectory", () => {
+    run(base, ["init", "-q"]);
+    const inner = join(base, "src", "deep");
+    mkdirSync(inner, { recursive: true });
+    const [found] = readRepoStates(inner);
+    expect(found?.name).toBeUndefined();
+    // Resolved through realpath, since temp dirs are symlinked on macOS.
+    expect(found?.root).toBe(realpathSync(base));
+  });
+
+  it("scans immediate children when cwd is in no repo", () => {
+    for (const name of ["api", "web"]) {
+      mkdirSync(join(base, name));
+      run(join(base, name), ["init", "-q"]);
+    }
+    mkdirSync(join(base, "plain"));
+    expect(readRepoStates(base).map((r) => r.name)).toEqual(["api", "web"]);
+  });
+
+  it("does not skip a repo by directory name", () => {
+    // Nothing is filtered by name, so a checkout at vendor or dist still counts.
+    for (const name of ["vendor", "node_modules"]) {
+      mkdirSync(join(base, name));
+      run(join(base, name), ["init", "-q"]);
+    }
+    expect(readRepoStates(base).map((r) => r.name)).toEqual(["node_modules", "vendor"]);
+  });
+
+  it("ignores hidden directories", () => {
+    mkdirSync(join(base, ".cache"));
+    run(join(base, ".cache"), ["init", "-q"]);
+    expect(readRepoStates(base)).toEqual([]);
+  });
+
+  it("is empty when nothing at or below cwd is a repo", () => {
+    mkdirSync(join(base, "plain"));
+    expect(readRepoStates(base)).toEqual([]);
+  });
+});
+
+describe("readGitRoot", () => {
+  it("resolves the repo root from inside the repo", () => {
+    expect(readGitRoot(process.cwd())).toBe(process.cwd());
+  });
+
+  it("is undefined outside a repo", () => {
+    expect(readGitRoot("/")).toBeUndefined();
   });
 });
 
@@ -247,38 +310,52 @@ describe("describeRepo", () => {
 });
 
 describe("formatGitNote", () => {
+  const CWD = "/Users/joe/Code";
+
   it("is undefined when nothing there is a repo", () => {
-    expect(formatGitNote([])).toBeUndefined();
+    expect(formatGitNote([], CWD)).toBeUndefined();
   });
 
-  it("describes a single repo at the working directory without naming it", () => {
-    expect(formatGitNote([repo(undefined, {})])).toBe("Git: branch main, at 9b3a2059, clean");
+  it("describes cwd's own repo without naming a path", () => {
+    expect(formatGitNote([repo(undefined, {})], CWD)).toBe("Git: branch main, at 9b3a2059, clean");
   });
 
-  it("names each repo when several sit side by side", () => {
-    const note = formatGitNote([
-      repo("api", { dirtyCount: 2 }),
-      repo("web", { behind: 1, upstream: "origin/dev" }),
-    ]);
-    expect(note).toContain("2 repos here.");
-    expect(note).toContain("api: branch main, at 9b3a2059, 2 uncommitted changes.");
-    expect(note).toContain("web: branch main, at 9b3a2059, clean, 1 behind of origin/dev.");
+  it("names the repo root when pi started in a subdirectory", () => {
+    // git reports changed paths relative to the root, so the model needs it to
+    // resolve them from where it is standing.
+    expect(formatGitNote([repo(undefined, {}, "/Users/joe/Code/pi-plate")], CWD)).toBe(
+      "Git: branch main, at 9b3a2059, clean. Repo root: /Users/joe/Code/pi-plate",
+    );
   });
 
-  it("counts clean repos instead of listing them", () => {
-    const note = formatGitNote([repo("api", { dirtyCount: 1 }), repo("web", {}), repo("docs", {})]);
+  it("lists every sibling repo, one per line, under the parent path", () => {
+    const note = formatGitNote(
+      [
+        repo("api", { dirtyCount: 2 }),
+        repo("docs", { head: undefined, dirtyCount: 1 }),
+        repo("web", { behind: 1, upstream: "origin/dev", branch: "dev" }),
+      ],
+      CWD,
+    );
     expect(note).toBe(
-      "Git: 3 repos here. api: branch main, at 9b3a2059, 1 uncommitted changes. 2 others clean.",
+      [
+        "Git: 3 repos in /Users/joe/Code:",
+        "api: branch main, at 9b3a2059, 2 uncommitted changes",
+        "docs: branch main, no commits yet, 1 uncommitted changes",
+        "web: branch dev, at 9b3a2059, clean, 1 behind of origin/dev",
+      ].join("\n"),
     );
   });
 
-  it("caps the described repos so the note cannot grow without bound", () => {
-    const many = Array.from({ length: MAX_DETAILED_REPOS + 3 }, (_, i) =>
-      repo(`r${i}`, { dirtyCount: 1 }),
-    );
-    const note = formatGitNote(many) ?? "";
-    expect(note.match(/uncommitted/g)).toHaveLength(MAX_DETAILED_REPOS);
-    expect(note).toContain("3 others.");
+  it("lists clean siblings too rather than summarizing them away", () => {
+    // Nothing here ranks repos, so omitting any would invite the model to treat
+    // the named ones as the whole working set.
+    const note = formatGitNote([repo("api", { dirtyCount: 1 }), repo("web", {})], CWD) ?? "";
+    expect(note).toContain("web: branch main, at 9b3a2059, clean");
+  });
+
+  it("says repo, not repos, for a lone sibling", () => {
+    expect(formatGitNote([repo("docs", { dirtyCount: 1 })], CWD)).toContain("1 repo in ");
   });
 });
 

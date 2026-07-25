@@ -3,10 +3,9 @@
  * about the machine, the clock, the repo, and how pi's bash tool actually behaves.
  *
  * Every note is a `<pi-note>` block, one fact per block, and a block appears only
- * when it is warranted. Notes become real, persisted messages, which is what keeps
- * llama.cpp's prefix cache intact -- a message written once renders byte-identically
- * on every later call, so the server never reprocesses the conversation. Nothing here
- * edits a borrowed copy of the context.
+ * when it is warranted. Notes are real, persisted messages, which is what keeps
+ * llama.cpp's prefix cache intact: a message written once renders byte-identically on
+ * every later call, so the server never reprocesses the conversation.
  *
  * Where each note goes:
  *   - provenance / environment / bash -- static, so they ride the system prompt,
@@ -19,7 +18,7 @@
 
 import { type ExtensionAPI, getShellConfig } from "@earendil-works/pi-coding-agent";
 import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { arch, platform } from "node:os";
 import { join } from "node:path";
 
@@ -57,15 +56,28 @@ export const PROVENANCE_NOTE =
   "Notes in <pi-note> blocks are facts about this machine and session, provided by " +
   "the pi harness rather than by the user.";
 
+/**
+ * Product names rather than `process.platform` values. The model reasons about command
+ * syntax from what it has read, and "macOS" carries far denser associations with BSD
+ * userland -- `stat -f`, `sed -i ''` -- than "darwin" does. The kernel name is kept in
+ * parentheses so the note still reconciles with what `uname -s` prints.
+ */
+const PLATFORM_NAMES: Record<string, string> = {
+  darwin: "macOS (Darwin)",
+  linux: "Linux",
+  win32: "Windows",
+};
+
 /** Platform and architecture. Locale and region are omitted: the time note carries both. */
 export function buildEnvironmentNote(): string {
-  return `Environment: ${platform()} ${arch()}`;
+  const name = platform();
+  return `Environment: ${PLATFORM_NAMES[name] ?? name} ${arch()}`;
 }
 
 /**
  * Directive first, explanation second. The model writes execution plans, so a rule of
  * action lands in the register it is already thinking in; a fact about shell semantics
- * has to be translated into one. The failures we observed were plans, not misstatements.
+ * has to be translated into one before it can be acted on.
  */
 export function buildBashNote(shell: string, root: string): string {
   return (
@@ -134,10 +146,10 @@ export function mutatesShellState(command: string): boolean {
 // =============================================================================
 
 /**
- * Local and UTC, both from JavaScript's own renderings rather than a hand-rolled
- * format. `toString()` carries weekday, offset, and zone name; `toISOString()` is
- * directly comparable against the ISO timestamps in logs and CI output, so the model
- * never has to convert between them -- the arithmetic small models get wrong.
+ * Local and UTC, both from JavaScript's own renderings. `toString()` carries weekday,
+ * offset, and zone name; `toISOString()` is directly comparable against the ISO
+ * timestamps in logs and CI output, so the model never has to convert between them --
+ * the arithmetic small models get wrong.
  */
 export function buildTimeNote(now: Date = new Date()): string {
   return `Current Time: Local: ${now.toString()}, UTC: ${now.toISOString()}`;
@@ -159,20 +171,18 @@ export interface GitState {
   behind: number;
 }
 
-/** A repo found at or below the working directory. `name` is undefined for cwd itself. */
+/** A repo found at or beside the working directory. */
 export interface RepoState {
+  /** Child directory name, when the repo was found by scanning siblings. */
   name?: string;
+  /**
+   * Absolute repo root, set only when it differs from cwd -- that is, when pi was
+   * started in a subdirectory. git reports changed paths relative to the root, so
+   * without this the model cannot resolve them from where it is standing.
+   */
+  root?: string;
   state: GitState;
 }
-
-/** How many repos are described in full before the rest are summarized as a count. */
-export const MAX_DETAILED_REPOS = 4;
-
-/** Subdirectories never worth scanning for a repo. */
-const SKIP_DIRS = new Set(["node_modules", "vendor", "target", "dist", "build"]);
-
-/** Cap on directory entries examined, so a huge parent cannot stall a turn. */
-const MAX_SCANNED_ENTRIES = 60;
 
 /**
  * Parse `git status --porcelain=v2 --branch`. One command carries branch, oid,
@@ -214,7 +224,7 @@ export function parseGitStatus(output: string): GitState {
  * the command times out. Returning undefined is the point: a note that guesses "clean"
  * when git did not answer is worse than no note, because the model is being told to
  * trust it. `--no-optional-locks` keeps git from blocking on a lock file, which is the
- * timeout that used to produce exactly that false reading.
+ * most likely way this call runs out its timeout.
  */
 export function readGitState(dir: string): GitState | undefined {
   try {
@@ -229,25 +239,70 @@ export function readGitState(dir: string): GitState | undefined {
   }
 }
 
+/** Absolute repo root containing `dir`, or undefined when git cannot say. */
+export function readGitRoot(dir: string): string | undefined {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 2000,
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether git can run at all. Checked before a scan, so a missing git costs one spawn, not N. */
+function gitInstalled(): boolean {
+  try {
+    execFileSync("git", ["--version"], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 2000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Repos at `cwd`, or -- when `cwd` is not itself a repo -- in its immediate children.
+ * Repos at `cwd`, or -- when `cwd` is not in a repo at all -- in its immediate children.
  * Starting pi in a parent holding several checkouts is common enough that reporting
  * nothing there would make the note useless exactly where it is most wanted.
+ *
+ * A `.git` entry in `cwd` settles it immediately and skips the scan. Otherwise git is
+ * still asked, because it walks up on its own and pi is often started in a
+ * subdirectory of a repo. Only when git says `cwd` is in no repo do we look sideways.
+ *
+ * Children are filtered by the presence of `.git` before git is spawned: a stat costs
+ * microseconds where a spawn costs milliseconds, which is what makes scanning every
+ * child affordable. `.git` is a file rather than a directory in worktrees and
+ * submodules, so this tests existence, not type. Nothing is skipped by name -- a repo
+ * checked out at `vendor` or `dist` is still a repo.
  */
 export function readRepoStates(cwd: string): RepoState[] {
+  if (existsSync(join(cwd, ".git"))) {
+    const own = readGitState(cwd);
+    return own ? [{ state: own }] : [];
+  }
+
   const own = readGitState(cwd);
   if (own) {
-    return [{ state: own }];
+    const root = readGitRoot(cwd);
+    return [root && root !== cwd ? { root, state: own } : { state: own }];
+  }
+
+  if (!gitInstalled()) {
+    return [];
   }
 
   let names: string[];
   try {
     names = readdirSync(cwd, { withFileTypes: true })
-      .filter(
-        (entry) => entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name),
-      )
-      .slice(0, MAX_SCANNED_ENTRIES)
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
       .map((entry) => entry.name)
+      .filter((name) => existsSync(join(cwd, name, ".git")))
       .sort();
   } catch {
     return [];
@@ -261,11 +316,6 @@ export function readRepoStates(cwd: string): RepoState[] {
     }
   }
   return repos;
-}
-
-/** Whether a repo is worth describing, as opposed to being counted as clean. */
-export function isNotable(state: GitState): boolean {
-  return state.dirtyCount > 0 || state.ahead > 0 || state.behind > 0 || !state.head;
 }
 
 /** Describe one repo's state, without the `Git:` label or a name prefix. */
@@ -282,37 +332,35 @@ export function describeRepo(state: GitState): string {
 }
 
 /**
- * Render the repos as one note, or undefined when there are none. With several repos
- * only the notable ones are described and the rest are counted: this note is written
- * into history on every turn it changes, so an unabridged list would accumulate.
+ * Render the repos as one note, or undefined when there are none. Every repo found is
+ * listed: naming only some of them would leave the model to assume the omitted ones
+ * are irrelevant, and nothing here ranks them. Which directory to start pi in is the
+ * user's decision, so the note reports what is there.
+ *
+ * The parent path is restated for the sibling case because this note rides a turn
+ * message, which can sit far from pi's own `Current working directory:` line -- "here"
+ * only resolves if that line is still in view.
  */
-export function formatGitNote(repos: readonly RepoState[]): string | undefined {
+export function formatGitNote(repos: readonly RepoState[], cwd: string): string | undefined {
   const [first] = repos;
   if (!first) {
     return undefined;
   }
   if (repos.length === 1 && !first.name) {
-    return `Git: ${describeRepo(first.state)}`;
+    const described = `Git: ${describeRepo(first.state)}`;
+    return first.root ? `${described}. Repo root: ${first.root}` : described;
   }
 
-  const notable = repos.filter((repo) => isNotable(repo.state));
-  const shown = notable.slice(0, MAX_DETAILED_REPOS);
-  const parts = [`Git: ${repos.length} repos here.`];
-  for (const repo of shown) {
-    parts.push(`${repo.name}: ${describeRepo(repo.state)}.`);
+  const lines = [`Git: ${repos.length} ${repos.length === 1 ? "repo" : "repos"} in ${cwd}:`];
+  for (const repo of repos) {
+    lines.push(`${repo.name}: ${describeRepo(repo.state)}`);
   }
-  const remaining = repos.length - shown.length;
-  if (remaining > 0) {
-    parts.push(
-      notable.length > shown.length ? `${remaining} others.` : `${remaining} others clean.`,
-    );
-  }
-  return parts.join(" ");
+  return lines.join("\n");
 }
 
 /** The git note for `cwd`, or undefined when nothing there is a repo. */
 export function buildGitNote(cwd: string): string | undefined {
-  return formatGitNote(readRepoStates(cwd));
+  return formatGitNote(readRepoStates(cwd), cwd);
 }
 
 // =============================================================================

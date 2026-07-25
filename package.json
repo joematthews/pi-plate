@@ -35,7 +35,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run spell && npm run test",
-    "prepare": "husky || true"
+    "prepare": "husky"
   },
   "lint-staged": {
     "*.{ts,mjs,cjs,js}": [
@@ -48,11 +48,6 @@
   },
   "dependencies": {},
   "devDependencies": {
-    "@cspell/dict-bash": "^4.2.3",
-    "@cspell/dict-en_us": "^4.4.36",
-    "@cspell/dict-node": "^5.0.9",
-    "@cspell/dict-software-terms": "^5.2.4",
-    "@cspell/dict-typescript": "^3.2.3",
     "@earendil-works/pi-coding-agent": "^0.81.1",
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.1.10",
