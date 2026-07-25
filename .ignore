@@ -1,0 +1,18 @@
+# Read by ripgrep and, through it, VS Code search (and other .ignore-aware tools).
+# `.gitignore` excludes `node_modules/`, which also drops it from search. This file
+# re-includes just the pi harness packages this extension is written against, so
+# their types and source stay searchable in the editor without committing them.
+#
+# Idiom: un-ignore node_modules, re-ignore its direct children, then keep only the
+# @earendil-works packages.
+!node_modules/
+node_modules/*
+!node_modules/@earendil-works/
+
+# Those packages vendor their own transitive deps; drop that third-party noise but
+# keep the nested pi packages (pi-ai, pi-agent-core live under pi-coding-agent).
+node_modules/@earendil-works/**/node_modules/*
+!node_modules/@earendil-works/**/node_modules/@earendil-works/
+
+# Sourcemaps are not worth searching.
+*.map

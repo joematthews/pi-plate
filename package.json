@@ -1,0 +1,78 @@
+{
+  "name": "pi-plate",
+  "version": "0.1.0",
+  "description": "A pi extension that gives models a surface to stand on: ground truth about the machine, the clock, the repo, and how pi's bash tool actually behaves -- seen by the model, not the TUI.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "grounding",
+    "context",
+    "local-models",
+    "llama-cpp"
+  ],
+  "license": "MIT",
+  "author": "Joe Matthews",
+  "type": "module",
+  "main": "./index.ts",
+  "files": [
+    "index.ts",
+    "debug.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "spell": "cspell --no-progress \"**/*\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run spell && npm run test",
+    "prepare": "husky || true"
+  },
+  "lint-staged": {
+    "*.{ts,mjs,cjs,js}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,jsonc,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@cspell/dict-bash": "^4.2.3",
+    "@cspell/dict-en_us": "^4.4.36",
+    "@cspell/dict-node": "^5.0.9",
+    "@cspell/dict-software-terms": "^5.2.4",
+    "@cspell/dict-typescript": "^3.2.3",
+    "@earendil-works/pi-coding-agent": "^0.81.1",
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "cspell": "^10.0.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.5",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
