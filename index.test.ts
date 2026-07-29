@@ -321,8 +321,10 @@ describe("buildGitNote", () => {
     expect(buildGitNote("/")).toBeUndefined();
   });
 
+  // Reads real git rather than a fixture, so it asserts that git was read and parsed -- a
+  // checkout is on a branch or detached depending on who made it, and describeRepo covers both.
   it("describes this repo when run inside it", () => {
-    expect(buildGitNote(process.cwd())).toMatch(/^Git: branch /);
+    expect(buildGitNote(process.cwd())).toMatch(/^Git: .+, at [0-9a-f]{8}, /);
   });
 });
 
