@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import piPlate, {
   bashEnabled,
   buildBashNote,
-  buildBashStateNotice,
   buildEnvironmentNote,
   buildGitNote,
   buildStaticNotes,
@@ -15,7 +14,6 @@ import piPlate, {
   describeRepo,
   formatGitNote,
   type GitState,
-  mutatesShellState,
   NOTE_TYPE,
   parseGitStatus,
   PROVENANCE_NOTE,
@@ -103,47 +101,6 @@ describe("buildStaticNotes", () => {
     // own body, so a bare substring match would over-count.
     expect(buildStaticNotes("/repo", true).match(/^<pi-note>$/gm)).toHaveLength(3);
     expect(buildStaticNotes("/repo", false).match(/^<pi-note>$/gm)).toHaveLength(2);
-  });
-});
-
-// =============================================================================
-// Bash state notice
-// =============================================================================
-
-describe("buildBashStateNotice", () => {
-  it("reports the transition rather than re-teaching the rule", () => {
-    const notice = buildBashStateNotice("/repo");
-    expect(notice).toContain("has exited");
-    expect(notice).toContain("/repo");
-    // The static note carries the directive. This one fires repeatedly, so it stays
-    // an event report; restating the rule here would cost tokens on every firing.
-    expect(notice).not.toContain("chained with &&");
-  });
-});
-
-describe("mutatesShellState", () => {
-  it("is true for directory and env changes the next call might depend on", () => {
-    for (const command of ["cd src", "export FOO=bar", "source .env", ". .env", "FOO=bar"]) {
-      expect(mutatesShellState(command), command).toBe(true);
-    }
-  });
-
-  it("is false for stateless commands", () => {
-    for (const command of ["ls", "npm test", "git status", "rg cd src"]) {
-      expect(mutatesShellState(command), command).toBe(false);
-    }
-  });
-
-  it("finds a state change in any segment of a compound command", () => {
-    expect(mutatesShellState("npm ci && cd dist")).toBe(true);
-  });
-
-  it("ignores a transient VAR=value prefix that scopes to one command", () => {
-    expect(mutatesShellState("FOO=bar make")).toBe(false);
-  });
-
-  it("does not treat a cd inside a subshell as persistent", () => {
-    expect(mutatesShellState("(cd src && ls)")).toBe(false);
   });
 });
 
@@ -492,81 +449,5 @@ describe("before_agent_start", () => {
       harness.ctx,
     );
     expect(afterReset.message.content).toContain("Git: ");
-  });
-});
-
-describe("tool_result", () => {
-  let harness: ReturnType<typeof register>;
-
-  const bashResult = (command: unknown, overrides: Record<string, unknown> = {}) => ({
-    toolName: "bash",
-    toolCallId: "call_1",
-    input: { command },
-    content: [{ type: "text", text: "output" }],
-    isError: false,
-    details: { truncation: { truncated: true } },
-    usage: { input: 1, output: 2 },
-    ...overrides,
-  });
-
-  beforeEach(() => {
-    harness = register();
-  });
-
-  it("appends the notice after a state-mutating command", () => {
-    const result = call<{ content: { type: string; text: string }[] }>(
-      harness.handlers,
-      "tool_result",
-      bashResult("cd src"),
-      harness.ctx,
-    );
-    const [output, notice] = result.content;
-    expect(result.content).toHaveLength(2);
-    expect(output?.text).toBe("output");
-    expect(notice?.text).toContain("<pi-note>");
-    expect(notice?.text).toContain(harness.ctx.cwd);
-  });
-
-  it("stays silent after a stateless command", () => {
-    expect(call(harness.handlers, "tool_result", bashResult("ls"), harness.ctx)).toBeUndefined();
-  });
-
-  it("keeps the notice when the command cannot be read (fail open)", () => {
-    const result = call<{ content: unknown[] }>(
-      harness.handlers,
-      "tool_result",
-      bashResult(undefined),
-      harness.ctx,
-    );
-    expect(result.content).toHaveLength(2);
-  });
-
-  it("ignores tools other than bash", () => {
-    const result = call(
-      harness.handlers,
-      "tool_result",
-      bashResult("cd src", { toolName: "read" }),
-      harness.ctx,
-    );
-    expect(result).toBeUndefined();
-  });
-
-  it("patches only content, leaving the rest for pi to merge", () => {
-    // pi merges a handler's result over the original, so returning details, isError,
-    // or usage here would overwrite the tool's own values and any other extension's.
-    const event = bashResult("cd src", { isError: true });
-    const result = call<Record<string, unknown>>(
-      harness.handlers,
-      "tool_result",
-      event,
-      harness.ctx,
-    );
-    expect(Object.keys(result)).toEqual(["content"]);
-  });
-
-  it("does not mutate the original result content", () => {
-    const event = bashResult("cd src");
-    call(harness.handlers, "tool_result", event, harness.ctx);
-    expect(event.content).toHaveLength(1);
   });
 });
