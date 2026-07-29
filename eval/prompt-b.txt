@@ -1,9 +1,0 @@
-In ~/Code/playground, set up two small packages side by side.
-
-1. Create directories `api` and `web`.
-2. In `api`, run `npm init -y`.
-3. In `api`, install `dedent`.
-4. In `web`, run `npm init -y`.
-5. In `web`, install `ms`.
-6. Write `api/README.md` with two lines: the package name and the exact version of dedent that was installed, then a copyright notice.
-7. Print both package.json files.

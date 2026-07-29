@@ -5,15 +5,7 @@
  *
  * `root` defaults to the current working directory.
  */
-import {
-  bashEnabled,
-  buildBashStateNotice,
-  buildGitNote,
-  buildStaticNotes,
-  buildTimeNote,
-  mutatesShellState,
-  wrapNote,
-} from "./index.ts";
+import { bashEnabled, buildGitNote, buildStaticNotes, buildTimeNote, wrapNote } from "./index.ts";
 
 const root = process.argv[2] ?? process.cwd();
 
@@ -29,13 +21,3 @@ console.log("trigger: time always; git only in a repo, and only when it changed\
 const git = buildGitNote(root);
 console.log(wrapNote(buildTimeNote()));
 console.log(git ? wrapNote(git) : "(no git note -- nothing here is a repo)");
-
-console.log("\n\n=== bash result notice (per command) ===");
-console.log("trigger: the command changed shell state\n");
-for (const command of ["cd src", "export FOO=bar", "npm ci && cd dist", "ls", "FOO=bar make"]) {
-  const fires = mutatesShellState(command);
-  console.log(`[${fires ? "NOTE" : "skip"}] ${command}`);
-  if (fires) {
-    console.log(wrapNote(buildBashStateNotice(root)));
-  }
-}
