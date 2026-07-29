@@ -1,6 +1,6 @@
 {
   "name": "pi-plate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A pi extension that gives models a surface to stand on: ground truth about the machine, the clock, the repo, and how pi's bash tool actually behaves -- seen by the model, not the TUI.",
   "keywords": [
     "pi-package",
