@@ -71,7 +71,8 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/joematthews/pi-plate/main/illustration.jpg"
   },
   "repository": {
     "type": "git",
