@@ -47,22 +47,22 @@
     ]
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.81.1",
+    "@earendil-works/pi-coding-agent": "^0.86.0",
     "@eslint/js": "^10.0.1",
     "@eslint/markdown": "^8.0.3",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.1",
     "cspell": "^10.0.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-repertoire": "^0.1.0",
+    "eslint-plugin-repertoire": "^0.2.0",
     "husky": "^9.1.7",
     "jsonc-eslint-parser": "^3.1.0",
     "lint-staged": "^17.0.8",
     "prettier": "^3.9.5",
     "tsx": "^4.23.1",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.64.0",
-    "vitest": "^4.1.10",
+    "vitest": "^5.0.1",
     "yaml-eslint-parser": "^2.1.0"
   },
   "peerDependencies": {
